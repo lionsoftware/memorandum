@@ -2,3 +2,4 @@ node_modules/
 dist/
 .memorandum/
 *.tmp
+.mcp.json
