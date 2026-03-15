@@ -12,11 +12,9 @@ export const RESERVED_FIELDS = [
 export const DEFAULT_MAX_DOCUMENT_SIZE = 16 * 1024 * 1024;
 export const MAX_TAGS = 50;
 export const DEFAULT_LIST_LIMIT = 50;
-export const INLINE_CONTENT_TYPES = ['text/', 'application/json', 'application/yaml'] as const;
-
 export const EXTENSION_MIME_MAP: Record<string, string> = {
   '.txt': 'text/plain', '.md': 'text/markdown',
-  '.json': 'application/json', '.yaml': 'application/yaml', '.yml': 'application/yaml',
+  '.json': 'text/json', '.yaml': 'text/yaml', '.yml': 'text/yaml',
   '.xml': 'text/xml', '.html': 'text/html', '.htm': 'text/html',
   '.css': 'text/css', '.js': 'text/javascript', '.ts': 'text/typescript',
   '.sh': 'text/x-shellscript', '.py': 'text/x-python',
@@ -35,12 +33,13 @@ export const DEFAULT_MIME_TYPE = 'application/octet-stream';
 // Helper Functions
 // ============================================================================
 
+/**
+ * Returns true if the content type should be stored inline (as text).
+ * Matches types starting with 'text/' only. MIME params after ';' are ignored.
+ */
 export function isInlineContentType(contentType: string): boolean {
-  return (
-    contentType.startsWith('text/') ||
-    contentType === 'application/json' ||
-    contentType === 'application/yaml'
-  );
+  const baseType = contentType.split(';')[0]!.trim();
+  return baseType.startsWith('text/');
 }
 
 export function mimeTypeFromExtension(ext: string): string {
@@ -114,6 +113,14 @@ export const DocumentDeleteDisplaySchema = z.object({
   id: z.string().describe('Document ID to delete'),
 });
 
+export const DocumentRestoreDisplaySchema = z.object({
+  id: z.string().describe('Document ID to restore (e.g., "doc-001")'),
+  target_path: z.string().describe('Absolute or relative path where the file will be written'),
+  force: z.boolean().optional().describe(
+    'If true, overwrite existing files and write even if SHA256 integrity check fails (default: false)',
+  ),
+});
+
 // ============================================================================
 // Input Schemas
 // ============================================================================
@@ -121,7 +128,7 @@ export const DocumentDeleteDisplaySchema = z.object({
 export const DocumentWriteCreateInputSchema = z.strictObject({
   _mode: z.literal('create'),
   title: z.string().min(1).max(500).optional(),
-  content_type: z.string().min(1).default('text/plain'),
+  content_type: z.string().min(1).optional(),
   topic: z.string().min(1).max(100).optional(),
   description: z.string().min(1).max(2000).optional(),
   tags: z.array(z.string().min(1).max(100)).max(MAX_TAGS).optional(),
@@ -175,6 +182,20 @@ export const DocumentDeleteInputSchema = z.strictObject({
   id: z.string().min(1),
 });
 
+export const DocumentRestoreInputSchema = z.strictObject({
+  id: z.string().min(1),
+  target_path: z.string().min(1),
+  force: z.boolean().default(false),
+});
+
+export interface DocumentRestoreResult {
+  success: true;
+  id: string;
+  target_path: string;
+  integrity_ok?: boolean;
+  warning?: string;
+}
+
 // ============================================================================
 // Inferred Types
 // ============================================================================
@@ -183,3 +204,4 @@ export type DocumentWriteInput = z.infer<typeof DocumentWriteInputSchema>;
 export type DocumentReadInput = z.infer<typeof DocumentReadInputSchema>;
 export type DocumentListInput = z.infer<typeof DocumentListInputSchema>;
 export type DocumentDeleteInput = z.infer<typeof DocumentDeleteInputSchema>;
+export type DocumentRestoreInput = z.infer<typeof DocumentRestoreInputSchema>;

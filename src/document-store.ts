@@ -8,7 +8,7 @@ import { createHash } from 'node:crypto';
 import { stringify as yamlStringify, parse as yamlParse } from 'yaml';
 import type { Logger } from 'pino';
 import type { Config, ResolvedPaths } from './config.js';
-import type { IndexFile, DocumentMetadata, FileValidationResult } from './document-types.js';
+import type { IndexFile, DocumentMetadata, FileValidationResult, DocumentRestoreResult } from './document-types.js';
 import { isInlineContentType, RESERVED_FIELDS, DEFAULT_LIST_LIMIT, mimeTypeFromExtension } from './document-types.js';
 import { MemorandumError } from './errors.js';
 import type { SemanticIndex } from './semantic-index.js';
@@ -686,5 +686,101 @@ export class DocumentStore {
 
     if (this.semanticIndex) this.semanticIndex.removeDocument(doc.id);
     return { deleted: true };
+  }
+
+  // ============================================================================
+  // Restore (extract document to disk)
+  // ============================================================================
+
+  /**
+   * Restores a document from the store to a file on disk.
+   * Verifies SHA256 integrity for binary documents. Refuses to overwrite
+   * existing files unless force=true.
+   *
+   * @param input - Restore parameters: id, target_path, force
+   * @returns Result with success status, path, and optional integrity info
+   */
+  public restore(input: { id: string; target_path: string; force: boolean }): DocumentRestoreResult {
+    this.validateDocumentId(input.id);
+
+    const doc = this.index.documents.find((d) => d.id === input.id);
+    if (!doc) {
+      throw new MemorandumError('document_not_found', `Document '${input.id}' not found`, { id: input.id });
+    }
+
+    const resolvedPath = resolve(input.target_path);
+
+    if (existsSync(resolvedPath) && !input.force) {
+      throw new MemorandumError(
+        'file_already_exists',
+        `File already exists at '${resolvedPath}'. Use force=true to overwrite.`,
+        { path: resolvedPath },
+      );
+    }
+
+    const parentDir = dirname(resolvedPath);
+    if (!existsSync(parentDir)) {
+      mkdirSync(parentDir, { recursive: true });
+    }
+
+    const result: DocumentRestoreResult = {
+      success: true,
+      id: input.id,
+      target_path: resolvedPath,
+    };
+
+    if (isInlineContentType(doc.content_type)) {
+      const filePath = join(this.documentsPath, `${doc.id}.md`);
+      let bodyContent = '';
+      try {
+        const content = readFileSync(filePath, 'utf-8');
+        const { body } = this.parseFrontmatter(content);
+        bodyContent = body;
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+          throw new MemorandumError('document_not_found', `Document file missing on disk for '${input.id}'`, { id: input.id, path: filePath });
+        }
+        throw err;
+      }
+      writeFileSync(resolvedPath, bodyContent, 'utf-8');
+    } else {
+      if (!doc.blob_path) {
+        throw new MemorandumError('document_not_found', `Blob path missing for document '${input.id}'`, { id: input.id });
+      }
+
+      const blobPath = join(this.documentsPath, doc.blob_path);
+      let blobData: Buffer;
+      try {
+        blobData = readFileSync(blobPath);
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+          throw new MemorandumError('document_not_found', `Blob file missing on disk for '${input.id}'`, { id: input.id, path: blobPath });
+        }
+        throw err;
+      }
+
+      if (doc.blob_sha256) {
+        const actual = createHash('sha256').update(blobData).digest('hex');
+        if (actual !== doc.blob_sha256) {
+          if (!input.force) {
+            throw new MemorandumError(
+              'integrity_error',
+              `SHA256 mismatch for '${input.id}': expected ${doc.blob_sha256}, got ${actual}. Use force=true to write anyway.`,
+              { id: input.id, expected: doc.blob_sha256, actual },
+            );
+          }
+          result.integrity_ok = false;
+          result.warning = `SHA256 mismatch: expected ${doc.blob_sha256}, got ${actual}`;
+        } else {
+          result.integrity_ok = true;
+        }
+      }
+
+      writeFileSync(resolvedPath, blobData);
+    }
+
+    this.logger.debug({ id: input.id, path: resolvedPath }, 'Document restored to disk');
+
+    return result;
   }
 }

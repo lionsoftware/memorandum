@@ -163,7 +163,7 @@ async function main(): Promise<void> {
   const transport = new StdioServerTransport();
   await server.connect(transport);
 
-  logger.info({ tools: 9, semantic: config.semantic_enabled }, 'Memorandum ready');
+  logger.info({ tools: 10, semantic: config.semantic_enabled }, 'Memorandum ready');
 }
 
 main().catch((err) => {

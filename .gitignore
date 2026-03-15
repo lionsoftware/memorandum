@@ -1,5 +1,8 @@
 node_modules/
 dist/
 .memorandum/
+coverage/
 *.tmp
 .mcp.json
+test.raw
+test.raw.original

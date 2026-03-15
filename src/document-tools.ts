@@ -7,10 +7,11 @@ import {
   DocumentReadDisplaySchema, DocumentReadInputSchema,
   DocumentListDisplaySchema, DocumentListInputSchema,
   DocumentDeleteDisplaySchema, DocumentDeleteInputSchema,
+  DocumentRestoreDisplaySchema, DocumentRestoreInputSchema,
 } from './document-types.js';
 
 /**
- * Registers document_write, document_read, document_list, and document_delete tools on the MCP server.
+ * Registers document_write, document_read, document_list, document_delete, and document_restore tools on the MCP server.
  * @param server - The MCP server instance to register tools on.
  * @param store - The document store used for CRUD operations on documents.
  * @param _logger - Logger instance (reserved for future use).
@@ -98,6 +99,28 @@ export function registerDocumentTools(
         const input = DocumentDeleteInputSchema.parse(rawInput);
         const result = store.delete(input);
         const output = { success: true, deleted: result.deleted };
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify(output) }],
+          structuredContent: output,
+        };
+      } catch (error) {
+        return toMcpErrorResponse(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    'document_restore',
+    {
+      title: 'Restore Document',
+      description: 'Restore a document from the store to a file on disk. Verifies SHA256 integrity for binary documents. Refuses to overwrite existing files unless force=true.',
+      inputSchema: DocumentRestoreDisplaySchema,
+    },
+    async (rawInput) => {
+      try {
+        const input = DocumentRestoreInputSchema.parse(rawInput);
+        const result = store.restore(input);
+        const output: Record<string, unknown> = { ...result };
         return {
           content: [{ type: 'text' as const, text: JSON.stringify(output) }],
           structuredContent: output,
